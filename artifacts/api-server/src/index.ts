@@ -15,12 +15,12 @@ if (!telegramToken) {
   const { bot, startScheduler } = createBot(telegramToken);
 
   app.post("/api/telegram/webhook", async (req, res) => {
+    res.status(200).json({ ok: true }); // ACK Telegram immediately
     try {
-      logger.info({ body: req.body?.update_id }, "Telegram update received");
-      await bot.handleUpdate(req.body, res as any);
+      logger.info({ update_id: req.body?.update_id, type: Object.keys(req.body ?? {}).find(k => k !== 'update_id') }, "Telegram update received");
+      await bot.handleUpdate(req.body); // No res — use standard API calls
     } catch (err) {
       logger.error({ err }, "Webhook handler error");
-      res.status(200).json({ ok: true });
     }
   });
 
