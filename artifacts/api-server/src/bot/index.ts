@@ -10,16 +10,12 @@ import {
   formatKachiPrice,
 } from "./price";
 import { getRandomKachiMessage, getRandomBachiMessage } from "./motivational";
-
-const KACHI_GROUP_IDS = (process.env["KACHI_GROUP_IDS"] ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-const BACHI_GROUP_IDS = (process.env["BACHI_GROUP_IDS"] ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+import {
+  registerGroup,
+  unregisterGroup,
+  getGroups,
+  type TokenType,
+} from "./registry";
 
 const greetings = [
   "hello", "hi", "hey", "sup", "yo", "gm", "good morning",
@@ -55,9 +51,19 @@ function detectToken(text: string): "kachi" | "bachi" | "both" | null {
 function detectIntent(text: string): "price" | "buy" | "stats" | "greeting" | "unknown" {
   const lower = text.toLowerCase();
   if (greetings.some((g) => lower.includes(g))) return "greeting";
-  if (lower.includes("buy") || lower.includes("purchase") || lower.includes("get some") || lower.includes("where to buy")) return "buy";
-  if (lower.includes("price") || lower.includes("how much") || lower.includes("cost") || lower.includes("worth") || lower.includes("value")) return "price";
-  if (lower.includes("stat") || lower.includes("info") || lower.includes("detail") || lower.includes("data") || lower.includes("volume") || lower.includes("market cap") || lower.includes("mcap") || lower.includes("fdv") || lower.includes("liquidity")) return "stats";
+  if (
+    lower.includes("buy") || lower.includes("purchase") ||
+    lower.includes("get some") || lower.includes("where to buy")
+  ) return "buy";
+  if (
+    lower.includes("price") || lower.includes("how much") ||
+    lower.includes("cost") || lower.includes("worth") || lower.includes("value")
+  ) return "price";
+  if (
+    lower.includes("stat") || lower.includes("info") || lower.includes("detail") ||
+    lower.includes("data") || lower.includes("volume") || lower.includes("market cap") ||
+    lower.includes("mcap") || lower.includes("fdv") || lower.includes("liquidity")
+  ) return "stats";
   return "unknown";
 }
 
@@ -70,6 +76,18 @@ function isRelevantMessage(text: string): boolean {
     "token", "purchase", "trade", "chart", "dex",
   ];
   return keywords.some((kw) => lower.includes(kw));
+}
+
+async function isAdminOrCreator(ctx: Context, userId: number): Promise<boolean> {
+  try {
+    const chat = ctx.chat;
+    if (!chat) return false;
+    if (chat.type === "private") return true;
+    const member = await ctx.telegram.getChatMember(chat.id, userId);
+    return member.status === "administrator" || member.status === "creator";
+  } catch {
+    return false;
+  }
 }
 
 async function handleTokenQuery(
@@ -99,7 +117,6 @@ async function handleTokenQuery(
       );
       return;
     }
-
     if (intent === "stats") {
       await ctx.replyWithMarkdown(formatBachiStats(stats), { disable_web_page_preview: true } as any);
     } else if (intent === "buy") {
@@ -123,12 +140,16 @@ export function createBot(token: string) {
     await ctx.replyWithMarkdown(
       `👋 *Welcome! I'm your community sentinel bot.*\n\n` +
       `I track *KACHI* and *BACHI* tokens and keep the community informed.\n\n` +
-      `*Commands you can use:*\n` +
-      `• Just say "price", "buy", "stats" + token name\n` +
-      `• /kachi — KACHI info & price link\n` +
-      `• /bachi — BACHI live stats\n` +
-      `• /help — show this message\n\n` +
-      `_I also send motivational messages every 3 hours — stay strong! 💎_`
+      `*Quick Commands:*\n` +
+      `• /kachi — KACHI info & buy link\n` +
+      `• /bachi — Live BACHI stats\n` +
+      `• /price — Token prices\n` +
+      `• /stats — Full token stats\n` +
+      `• /help — All commands\n\n` +
+      `*For group admins:*\n` +
+      `• /register kachi — Register this group as a KACHI community\n` +
+      `• /register bachi — Register this group as a BACHI community\n\n` +
+      `_I also send motivational messages every 3 hours to registered groups! 💎_`
     );
   });
 
@@ -137,10 +158,121 @@ export function createBot(token: string) {
       `🤖 *Bot Commands*\n\n` +
       `*/kachi* — KACHI price link & token info\n` +
       `*/bachi* — Live BACHI stats from DexScreener\n` +
-      `*/stats* — Combined stats prompt\n` +
-      `*/price* — Price info for both tokens\n\n` +
-      `Or just type naturally — mention *buy*, *price*, *stats*, or a token name anywhere in a message and I'll pick it up!`
+      `*/price* — Price info for both tokens\n` +
+      `*/stats* — Full token stats\n\n` +
+      `*Admin-only:*\n` +
+      `*/register kachi* — Add this group to KACHI broadcasts\n` +
+      `*/register bachi* — Add this group to BACHI broadcasts\n` +
+      `*/unregister kachi* — Remove from KACHI broadcasts\n` +
+      `*/unregister bachi* — Remove from BACHI broadcasts\n` +
+      `*/groupstatus* — See this group's registration\n\n` +
+      `_Or just type naturally — say "kachi price", "buy bachi", "stats" etc. and I'll respond!_`
     );
+  });
+
+  bot.command("register", async (ctx) => {
+    const from = ctx.from;
+    if (!from) return;
+
+    const isAdmin = await isAdminOrCreator(ctx, from.id);
+    if (!isAdmin) {
+      await ctx.reply("⛔ Only group admins can register this group.");
+      return;
+    }
+
+    const args = ctx.message.text.split(" ").slice(1);
+    const tokenArg = args[0]?.toLowerCase();
+
+    if (tokenArg !== "kachi" && tokenArg !== "bachi") {
+      await ctx.replyWithMarkdown(
+        `❓ *Usage:*\n` +
+        `\`/register kachi\` — Register as a KACHI community\n` +
+        `\`/register bachi\` — Register as a BACHI community`
+      );
+      return;
+    }
+
+    const chatId = ctx.chat.id;
+    const chatTitle = (ctx.chat as any).title ?? "this group";
+    const result = registerGroup(chatId, tokenArg as TokenType);
+
+    if (result === "already") {
+      await ctx.replyWithMarkdown(
+        `✅ *${chatTitle}* is already registered as a *${tokenArg.toUpperCase()}* community.\n\n` +
+        `Motivational messages are already being sent here every 3 hours. 💎`
+      );
+    } else {
+      await ctx.replyWithMarkdown(
+        `🎉 *Success!* This group is now registered as a *${tokenArg.toUpperCase()}* community.\n\n` +
+        `I'll send motivational messages here every *3 hours* to keep the community strong. 💎🙌\n\n` +
+        `_Use \`/unregister ${tokenArg}\` to remove this group from broadcasts._`
+      );
+      logger.info({ chatId, token: tokenArg }, "Group registered via command");
+    }
+  });
+
+  bot.command("unregister", async (ctx) => {
+    const from = ctx.from;
+    if (!from) return;
+
+    const isAdmin = await isAdminOrCreator(ctx, from.id);
+    if (!isAdmin) {
+      await ctx.reply("⛔ Only group admins can unregister this group.");
+      return;
+    }
+
+    const args = ctx.message.text.split(" ").slice(1);
+    const tokenArg = args[0]?.toLowerCase();
+
+    if (tokenArg !== "kachi" && tokenArg !== "bachi") {
+      await ctx.replyWithMarkdown(
+        `❓ *Usage:*\n` +
+        `\`/unregister kachi\` — Remove from KACHI broadcasts\n` +
+        `\`/unregister bachi\` — Remove from BACHI broadcasts`
+      );
+      return;
+    }
+
+    const chatId = ctx.chat.id;
+    const chatTitle = (ctx.chat as any).title ?? "this group";
+    const result = unregisterGroup(chatId, tokenArg as TokenType);
+
+    if (result === "not_found") {
+      await ctx.replyWithMarkdown(
+        `ℹ️ *${chatTitle}* is not registered as a *${tokenArg.toUpperCase()}* community.\n` +
+        `Use \`/register ${tokenArg}\` to add it.`
+      );
+    } else {
+      await ctx.replyWithMarkdown(
+        `✅ *${chatTitle}* has been removed from *${tokenArg.toUpperCase()}* broadcasts.\n\n` +
+        `No more motivational messages will be sent here. You can re-register anytime with \`/register ${tokenArg}\`.`
+      );
+    }
+  });
+
+  bot.command("groupstatus", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const kachiGroups = getGroups("kachi");
+    const bachiGroups = getGroups("bachi");
+    const inKachi = kachiGroups.includes(chatId);
+    const inBachi = bachiGroups.includes(chatId);
+
+    if (!inKachi && !inBachi) {
+      await ctx.replyWithMarkdown(
+        `📋 *Group Status*\n\n` +
+        `This group is *not registered* for any broadcasts.\n\n` +
+        `Use:\n` +
+        `• \`/register kachi\` to join KACHI community broadcasts\n` +
+        `• \`/register bachi\` to join BACHI community broadcasts`
+      );
+    } else {
+      const lines: string[] = [`📋 *Group Registration Status*\n`];
+      if (inKachi) lines.push(`🟡 *KACHI* — ✅ Registered (receiving 3-hour broadcasts)`);
+      else lines.push(`🟡 *KACHI* — ❌ Not registered`);
+      if (inBachi) lines.push(`🔵 *BACHI* — ✅ Registered (receiving 3-hour broadcasts)`);
+      else lines.push(`🔵 *BACHI* — ❌ Not registered`);
+      await ctx.replyWithMarkdown(lines.join("\n"));
+    }
   });
 
   bot.command("kachi", async (ctx) => {
@@ -182,6 +314,8 @@ export function createBot(token: string) {
     const text = ctx.message.text;
     const chatType = ctx.chat.type;
     const botUsername = ctx.botInfo?.username ?? "";
+
+    if (text.startsWith("/")) return;
 
     const isMentioned =
       text.includes(`@${botUsername}`) ||
@@ -225,58 +359,48 @@ export function createBot(token: string) {
     }
   });
 
-  bot.on("chat_member", async (ctx) => {
-    const update = ctx.update as any;
-    const member = update.chat_member ?? update.my_chat_member;
-    if (!member) return;
-    const chatId = member.chat?.id;
-    const newMember = member.new_chat_member;
-    const botId = ctx.botInfo?.id;
-    if (newMember?.user?.id === botId && newMember?.status === "member") {
-      logger.info({ chatId }, "Bot added to group");
-    }
-  });
-
-  bot.on("new_chat_members", async (ctx) => {
-    const newMembers = ctx.message.new_chat_members;
-    const botId = ctx.botInfo?.id;
-    const isBotAdded = newMembers.some((m) => m.id === botId);
-    if (!isBotAdded) return;
-    logger.info({ chatId: ctx.chat.id }, "Bot added to new group");
-  });
-
   bot.catch((err, ctx) => {
     logger.error({ err, chatId: ctx.chat?.id }, "Bot error");
   });
 
   function startScheduler() {
     cron.schedule("0 */3 * * *", async () => {
-      logger.info("Sending 3-hour motivational messages");
+      logger.info("Running 3-hour motivational broadcast");
 
-      for (const groupId of KACHI_GROUP_IDS) {
+      const kachiGroups = getGroups("kachi");
+      const bachiGroups = getGroups("bachi");
+
+      for (const groupId of kachiGroups) {
         try {
           await bot.telegram.sendMessage(groupId, getRandomKachiMessage(), {
             parse_mode: "Markdown",
           });
           logger.info({ groupId }, "Sent KACHI motivational message");
         } catch (err) {
-          logger.error({ err, groupId }, "Failed to send KACHI motivational message");
+          logger.error({ err, groupId }, "Failed to send KACHI message — removing stale group");
+          unregisterGroup(groupId, "kachi");
         }
       }
 
-      for (const groupId of BACHI_GROUP_IDS) {
+      for (const groupId of bachiGroups) {
         try {
           await bot.telegram.sendMessage(groupId, getRandomBachiMessage(), {
             parse_mode: "Markdown",
           });
           logger.info({ groupId }, "Sent BACHI motivational message");
         } catch (err) {
-          logger.error({ err, groupId }, "Failed to send BACHI motivational message");
+          logger.error({ err, groupId }, "Failed to send BACHI message — removing stale group");
+          unregisterGroup(groupId, "bachi");
         }
       }
+
+      logger.info(
+        { kachiCount: kachiGroups.length, bachiCount: bachiGroups.length },
+        "Motivational broadcast complete"
+      );
     });
 
-    logger.info("3-hour motivational message scheduler started");
+    logger.info("3-hour motivational scheduler started");
   }
 
   return { bot, startScheduler };
