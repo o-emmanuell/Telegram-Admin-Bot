@@ -1,7 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { createBot } from "./bot/index";
-import { createTelegramRouter } from "./routes/telegram";
 
 const rawPort = process.env["PORT"];
 if (!rawPort) throw new Error("PORT environment variable is required.");
@@ -12,49 +11,52 @@ const telegramToken = process.env["TELEGRAM_BOT_TOKEN"];
 
 if (!telegramToken) {
   logger.warn("TELEGRAM_BOT_TOKEN not set — bot will not start");
-  startServer();
 } else {
   const { bot, startScheduler } = createBot(telegramToken);
 
-  app.use("/api", createTelegramRouter(bot));
+  app.post("/api/telegram/webhook", async (req, res) => {
+    try {
+      logger.info({ body: req.body?.update_id }, "Telegram update received");
+      await bot.handleUpdate(req.body, res as any);
+    } catch (err) {
+      logger.error({ err }, "Webhook handler error");
+      res.status(200).json({ ok: true });
+    }
+  });
 
-  startServer();
   startScheduler();
 
-  const devDomain = process.env["REPLIT_DEV_DOMAIN"];
-  const deployDomain = process.env["REPLIT_DEPLOYMENT_DOMAIN"];
-  const domain = deployDomain ?? devDomain;
+  const domain = process.env["REPLIT_DEPLOYMENT_DOMAIN"] ?? process.env["REPLIT_DEV_DOMAIN"];
 
   if (!domain) {
-    logger.warn("No Replit domain found — falling back to polling");
+    logger.warn("No domain found — falling back to polling");
     bot.launch({ dropPendingUpdates: true })
       .then(() => logger.info("Bot started (polling)"))
-      .catch((err) => logger.error({ err }, "Failed to start bot (polling)"));
+      .catch((err) => logger.error({ err }, "Polling failed"));
     process.once("SIGINT", () => bot.stop("SIGINT"));
     process.once("SIGTERM", () => bot.stop("SIGTERM"));
   } else {
     const webhookUrl = `https://${domain}/api/telegram/webhook`;
     bot.telegram
       .setWebhook(webhookUrl, { drop_pending_updates: true })
-      .then(() => logger.info({ webhookUrl }, "Webhook registered — bot active"))
+      .then(() => logger.info({ webhookUrl }, "Webhook set — bot active"))
       .catch((err) => logger.error({ err }, "Failed to set webhook"));
   }
 }
 
-function startServer() {
-  function tryListen() {
-    const server = app.listen(port, () => {
-      logger.info({ port }, "Server listening");
-    });
-    server.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE") {
-        logger.warn({ port }, "Port in use, retrying in 2s...");
-        setTimeout(() => { server.close(); tryListen(); }, 2000);
-      } else {
-        logger.error({ err }, "Fatal server error");
-        process.exit(1);
-      }
-    });
-  }
-  tryListen();
+function tryListen(retries = 0) {
+  const server = app.listen(port, () => {
+    logger.info({ port }, "Server listening");
+  });
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE" && retries < 5) {
+      logger.warn({ port, retries }, "Port in use, retrying in 2s...");
+      setTimeout(() => { server.close(); tryListen(retries + 1); }, 2000);
+    } else {
+      logger.error({ err }, "Fatal server error");
+      process.exit(1);
+    }
+  });
 }
+
+tryListen();

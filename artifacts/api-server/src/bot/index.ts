@@ -320,6 +320,29 @@ export function createBot(token: string) {
     await ctx.reply(aiReply);
   });
 
+  bot.on("my_chat_member", async (ctx) => {
+    const update = ctx.myChatMember;
+    const newStatus = update.new_chat_member.status;
+    const chat = ctx.chat;
+    if ((newStatus === "member" || newStatus === "administrator") && chat.type !== "private") {
+      const title = (chat as any).title ?? "this group";
+      await ctx.reply(
+        `👋 Hey ${title}! Thanks for adding me.\n\n` +
+        `⚠️ *Important setup step:*\n` +
+        `I currently can't see regular messages in groups due to Telegram's bot privacy settings. To let me respond to greetings, "buy", "price" etc. — an admin needs to do ONE of these:\n\n` +
+        `*Option 1 (Recommended):* Disable privacy mode via BotFather:\n` +
+        `1. Open @BotFather\n` +
+        `2. Send /mybots → select this bot\n` +
+        `3. Bot Settings → Group Privacy → Turn off\n` +
+        `4. Remove and re-add me to this group\n\n` +
+        `*Option 2:* Make me a group admin (I can read messages as admin)\n\n` +
+        `Once done, I'll respond to everything! 🚀\n\n` +
+        `_For now, commands like /kachi /bachi /price /stats already work._`,
+        { parse_mode: "Markdown" }
+      );
+    }
+  });
+
   bot.catch((err: any, ctx) => {
     logger.error({ err: err?.message ?? err, chatId: ctx.chat?.id }, "Bot error");
   });
