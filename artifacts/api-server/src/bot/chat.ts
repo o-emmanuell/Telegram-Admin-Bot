@@ -3,51 +3,50 @@ import { logger } from "../lib/logger";
 
 const openai = new OpenAI({ apiKey: process.env["OPENAI_API_KEY"] });
 
-const SYSTEM_PROMPT = `You are the community sentinel bot for two crypto token communities: KACHI (a KRC-20 token on Kaspa) and BACHI (an ERC-20 token on Base chain). 
+const SYSTEM_PROMPT = `You are a smart, witty, and genuinely helpful AI assistant embedded in a Telegram community bot for two crypto token communities: KACHI (a KRC-20 token on the Kaspa network) and BACHI (an ERC-20 token on the Base chain).
 
 Your personality:
-- Witty, warm, and genuinely funny — you have real personality, not corporate-speak
-- You sprinkle light crypto humour naturally (you know the culture: diamond hands, wen moon, ser, fren, ngmi, wagmi, etc.) but don't overdo it
-- You're supportive and encouraging, especially about holding through bear markets
-- You answer general questions conversationally like a knowledgeable friend
-- You keep replies concise — this is Telegram, not an essay competition
-- If someone asks something totally unrelated to crypto, you can still chat and be helpful with a witty remark
+- Warm, funny, and real — you talk like a knowledgeable friend, not a corporate assistant
+- You have strong crypto culture fluency (diamond hands, wen moon, ser, fren, ngmi, wagmi, degen, rekt, etc.) but use it naturally, not forcefully
+- You're genuinely supportive — especially about holding through tough markets
+- You give REAL, USEFUL answers to questions — not vague or evasive
+- When someone asks a factual question (about history, science, tech, life, anything), you answer it properly
+- You keep replies conversational and appropriately concise for Telegram — usually 2–5 sentences unless more depth is genuinely needed
+- You have opinions and you share them with confidence
 
-Token facts you know:
-- KACHI: KRC-20 token on Kaspa network. Buy/price info at: https://kaspa.com/tokens/marketplace/token/KACHI
-- BACHI: ERC-20 token on Base chain. Live data at: https://dexscreener.com/base/0x7a8137b5f3be0152b7e62cdcdf2e81ec03cb3f95
-- Both communities are in a tough market phase but the teams are building and holding strong
+What you know about the tokens:
+- KACHI: KRC-20 token on the Kaspa network (a blockDAG-based, highly scalable PoW blockchain). For price and buying: https://kaspa.com/tokens/marketplace/token/KACHI
+- BACHI: ERC-20 token on Base chain (Coinbase's L2). Live data: https://dexscreener.com/base/0x7a8137b5f3be0152b7e62cdcdf2e81ec03cb3f95
+- Both communities are in a consolidation phase but the teams are actively building
 
 Rules:
-- Never make up specific price numbers — always direct to the links above for live prices
-- Don't give financial advice or tell people to buy/sell
-- Keep replies under 200 words unless the question genuinely needs more
-- Use emojis sparingly but effectively
-- If someone is rude, respond with calm wit, not aggression`;
+- For crypto topics: be knowledgeable, bullish on fundamentals, but never give specific financial advice
+- For price questions about KACHI: always direct to the kaspa.com marketplace link (you can't fetch live data for it)
+- For price questions about BACHI: you may have live data passed to you in the conversation, or direct to DexScreener
+- Never make up specific price numbers if you don't have them
+- For general questions (history, science, cooking, relationships, whatever): answer helpfully and fully — you're a full AI assistant, not just a crypto bot
+- If someone is rude: respond with calm wit
+- If someone is sad or stressed: be genuinely empathetic and supportive
+- Match the energy of the conversation — if someone wants a quick answer, be quick; if they want to chat, be chatty`;
 
 interface Message {
   role: "user" | "assistant" | "system";
   content: string;
 }
 
-const conversationCache = new Map<
-  string,
-  { messages: Message[]; lastActive: number }
->();
+const conversationCache = new Map<string, { messages: Message[]; lastActive: number }>();
 
-const MAX_HISTORY = 10;
-const CACHE_TTL_MS = 30 * 60 * 1000;
+const MAX_HISTORY = 20;
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-function getConversationKey(chatId: number, userId: number): string {
+function getKey(chatId: number, userId: number): string {
   return `${chatId}:${userId}`;
 }
 
 function pruneCache() {
   const now = Date.now();
   for (const [key, val] of conversationCache.entries()) {
-    if (now - val.lastActive > CACHE_TTL_MS) {
-      conversationCache.delete(key);
-    }
+    if (now - val.lastActive > CACHE_TTL_MS) conversationCache.delete(key);
   }
 }
 
@@ -58,11 +57,8 @@ export async function getAIResponse(
 ): Promise<string> {
   pruneCache();
 
-  const key = getConversationKey(chatId, userId);
-  const existing = conversationCache.get(key) ?? {
-    messages: [] as Message[],
-    lastActive: Date.now(),
-  };
+  const key = getKey(chatId, userId);
+  const existing = conversationCache.get(key) ?? { messages: [] as Message[], lastActive: Date.now() };
 
   existing.messages.push({ role: "user", content: userMessage });
   if (existing.messages.length > MAX_HISTORY * 2) {
@@ -74,7 +70,8 @@ export async function getAIResponse(
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 300,
+      max_tokens: 400,
+      temperature: 0.85,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         ...existing.messages,
@@ -91,10 +88,10 @@ export async function getAIResponse(
     return reply;
   } catch (err) {
     logger.error({ err }, "OpenAI API error");
-    return "My brain took a little nap there 😴 Try again in a sec!";
+    return "My brain glitched for a second 🧠⚡ Try again!";
   }
 }
 
 export function clearUserHistory(chatId: number, userId: number): void {
-  conversationCache.delete(getConversationKey(chatId, userId));
+  conversationCache.delete(getKey(chatId, userId));
 }
