@@ -1,7 +1,0 @@
-[build]
-builder = "NIXPACKS"
-buildCommand = "pnpm --filter @workspace/api-server build"
-
-[deploy]
-startCommand = "pnpm --filter @workspace/api-server start"
-restartPolicyType = "ON_FAILURE"
