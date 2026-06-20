@@ -1,7 +1,10 @@
 import OpenAI from "openai";
 import { logger } from "../lib/logger";
 
-const openai = new OpenAI({ apiKey: process.env["OPENAI_API_KEY"] });
+const openai = new OpenAI({
+  apiKey: process.env["OPENAI_API_KEY"],
+  baseURL: "https://openrouter.ai/api/v1",
+});
 
 const SYSTEM_PROMPT = `You are a smart, witty, and genuinely helpful AI assistant embedded in a Telegram community bot for two crypto token communities: KACHI (a KRC-20 token on the Kaspa network) and BACHI (an ERC-20 token on the Base chain).
 
@@ -69,7 +72,7 @@ export async function getAIResponse(
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "openai/gpt-4o-mini",
       max_tokens: 400,
       temperature: 0.85,
       messages: [
