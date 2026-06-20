@@ -1,0 +1,1 @@
+- [Telegram bot config](telegram-bot.md) — bot is @OzzyIzzy_Bot (ID 8977374147), privacy mode OFF, webhook mode, no res passed to handleUpdate
