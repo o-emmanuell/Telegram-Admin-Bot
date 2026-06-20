@@ -1,0 +1,11 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "pnpm --filter @workspace/api-server build"
+
+[deploy]
+startCommand = "pnpm --filter @workspace/api-server start"
+restartPolicyType = "ON_FAILURE"
+<<<<<<< HEAD
+=======
+
+>>>>>>> a901e7eef9038cfa877f385c5d7f438dc40069e3
